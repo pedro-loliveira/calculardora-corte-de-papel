@@ -8,9 +8,6 @@ from tkinter import Canvas, Scrollbar
 
 def desenhar_folha(canvas, dimensao_folha, dimensoes_corte, cortes_cabem,
                    sobra1=None, sobra2=None, cortes_requisitados=None):
-    """
-    Desenha a folha com a grade de cortes para uma única orientação.
-    """
     W, H = dimensao_folha
     pW, pH = dimensoes_corte
     canvas.delete("all")
@@ -69,9 +66,6 @@ def desenhar_folha(canvas, dimensao_folha, dimensoes_corte, cortes_cabem,
 
 
 def desenhar_folha_mista(canvas, dimensao_folha, dimensoes_corte, cortes_cabem, arranjo, cortes_requisitados=None):
-    """
-    Desenha a folha com a estratégia mista.
-    """
     W, H = dimensao_folha
     escala = min(400 / W, 300 / H)
     offset_x = (canvas.winfo_width() - W * escala) / 3
@@ -211,10 +205,6 @@ def calcular_cortes_cabem(dimensao_folha, dimensoes_corte):
 
 
 def calcular_sobras(dimensao_folha, dimensoes_corte, cortes_cabem, rotacionada=False):
-    """
-    Calcula as sobras da folha para a orientação normal ou rotacionada.
-    Retorna strings que indicam as dimensões das sobras se estas forem maiores ou iguais a 100 mm.
-    """
     W, H = dimensao_folha
     pW, pH = dimensoes_corte
     if pW == 0 or pH == 0:
@@ -241,10 +231,6 @@ def calcular_sobras(dimensao_folha, dimensoes_corte, cortes_cabem, rotacionada=F
 
 
 def calcular_cortes_misturados(dimensao_folha, dimensoes_corte):
-    """
-    Calcula quantos cortes cabem na folha utilizando uma estratégia mista.
-    Retorna uma tupla (total_misturado, arranjo), onde arranjo pode ser "normal" ou "rotacionada".
-    """
     W, H = dimensao_folha
     pW, pH = dimensoes_corte
     n_horiz_1 = W // pW
@@ -278,12 +264,6 @@ def calcular_cortes_misturados(dimensao_folha, dimensoes_corte):
 
 
 def calcular_sobras_mista(dimensao_folha, dimensoes_corte):
-    """
-    Calcula as sobras para a estratégia mista e retorna três strings (ou None) com:
-    Sobra Vertical
-    Sobra Inferior
-    Sobra Inferior Direita
-    """
     W, H = dimensao_folha
     pW, pH = dimensoes_corte
     n_horiz = W // pW
@@ -298,14 +278,6 @@ def calcular_sobras_mista(dimensao_folha, dimensoes_corte):
 
 
 def calcular_melhor_orientacao(dimensao_folha, dimensoes_corte):
-    """
-    Compara as estratégias:
-    Orientação normal
-    Orientação rotacionada
-    Estratégia mista
-    Retorna uma tupla ((dimensões usadas, nome da estratégia, arranjo), quantidade máxima),
-    onde "arranjo" é relevante somente para a estratégia mista.
-    """
     W, H = dimensao_folha
     pW, pH = dimensoes_corte
     cortes_normal = calcular_cortes_cabem((W, H), (pW, pH))
@@ -320,15 +292,6 @@ def calcular_melhor_orientacao(dimensao_folha, dimensoes_corte):
 
 
 def calcular_aproveitamento(dimensao_folha, dimensoes_corte, cortes_cabem):
-    """
-    Calcula o aproveitamento simples por áreas.
-    Parâmetros:
-    dimensao_folha: tupla (W, H) da folha.
-    dimensoes_corte: tupla (pW, pH) do corte utilizado.
-    cortes_cabem: número total de cortes dispostos na folha.
-    Retorna:
-    aproveitamento_pct: percentual de aproveitamento.
-    """
     W, H = dimensao_folha
     pW, pH = dimensoes_corte
     area_total = W * H
@@ -590,5 +553,4 @@ def _on_mousewheel(event):
 
 canvas_frame.bind_all("<MouseWheel>", _on_mousewheel)
 
-# Inicia o loop principal da interface gráfica
 root.mainloop()
