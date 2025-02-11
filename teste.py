@@ -1,7 +1,15 @@
 import tkinter as tk
 from tkinter import Canvas, Scrollbar
 import io
-from PIL import Image, ImageGrab
+from PIL import Image, ImageOps
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image as RLImage
+from reportlab.lib.pagesizes import landscape, A4
+from reportlab.lib.styles import getSampleStyleSheet
+
+# Variáveis globais para armazenar os textos com quebras HTML para o PDF
+info_v1_pdf = ""
+info_v2_pdf = ""
+info_v3_pdf = ""
 
 # ==================================================
 # Funções de desenho das folhas (frontend)
@@ -22,7 +30,6 @@ def desenhar_folha(canvas, dimensao_folha, dimensoes_corte, cortes_cabem,
     offset_y = (canvas.winfo_height() - H_scaled) / 4
     canvas.create_rectangle(offset_x, offset_y, offset_x + W_scaled, offset_y + H_scaled,
                             outline="black", fill="white")
-
     n_horiz = W // pW
     n_vert = H // pH
     for coluna in range(n_horiz):
@@ -49,14 +56,12 @@ def desenhar_folha(canvas, dimensao_folha, dimensoes_corte, cortes_cabem,
                                    text=f"Sobra: {sobra}", font=("Arial", 8), fill="blue", angle=angle)
             except Exception:
                 pass
-
     if sobra1:
         add_sobra_info(sobra1, (offset_x + W_scaled + 10,
                        offset_y + H_scaled/2), angle=90)
     if sobra2:
         add_sobra_info(sobra2, (offset_x + W_scaled /
                        2, offset_y + H_scaled + 10))
-
     canvas.create_line(offset_x, offset_y - 10, offset_x, offset_y + H_scaled + 10,
                        fill="red", width=2)
     canvas.create_line(offset_x - 10, offset_y, offset_x + W_scaled + 10, offset_y,
@@ -294,284 +299,247 @@ def calcular_aproveitamento(dimensao_folha, dimensoes_corte, cortes_cabem):
 
 
 # ==================================================
-# Função de cálculo dos percentuais para Versão 4 (subversão da Mista)
+# Função de exportação dos canvas para PDF (via postscript)
 # ==================================================
-
-def calcular_percentuais_versao4(bloco, dimensao_folha):
+def exportar_canvas_pdf(canvas, nome_arquivo, zoom=4):
     """
-    Calcula os percentuais para a Versão 4 (subversão da Mista) com base no bloco ideal utilizado.
-
-    Parâmetros:
-      - bloco: tupla (bw, bh) representando as dimensões do bloco utilizado (em mm).
-               Ex.: (990, 1100)
-      - dimensao_folha: tupla (W, H) da folha (em mm).
-
-    Regra:
-      Aproveitamento = área do bloco = bw * bh.
-      Sobra Vertical = (W - bw) x bh.
-         Se (W - bw) > 100, essa área é considerada SOBRAS;
-         Se (W - bw) ≤ 100 (e > 0), ela é considerada PERDA.
-      Sobra Horizontal = (H - bh) x bw.
-         Se (H - bh) > 100, essa área é considerada SOBRAS;
-         Se (H - bh) ≤ 100 (e > 0), ela é considerada PERDA.
-
-    Então:
-      Área_total = W * H.
-      Área_perda = (se (W - bw) ≤ 100 então (W - bw) * bh) + (se (H - bh) ≤ 100 então bw * (H - bh))
-      Área_aproveitamento = área do bloco.
-      Área_sobras_validas = Área_total - (Área_aproveitamento + Área_perda).
-
-    Retorna:
-         (aproveitamento_pct, perda_pct, sobras_pct)
+    Exporta o conteúdo do canvas para um arquivo PDF utilizando o método postscript.
+    O parâmetro zoom aumenta a resolução.
     """
-    W, H = dimensao_folha
-    bw, bh = bloco
-    total_area = W * H
-    area_bloco = bw * bh
-    perda = 0
-    sobra_vertical = W - bw
-    if sobra_vertical > 0 and sobra_vertical <= 100:
-        perda += sobra_vertical * bh
-    sobra_horizontal = H - bh
-    if sobra_horizontal > 0 and sobra_horizontal <= 100:
-        perda += bw * sobra_horizontal
-    aproveitamento = area_bloco
-    sobras_validas = total_area - (area_bloco + perda)
-    aproveitamento_pct = (aproveitamento / total_area) * 100
-    perda_pct = (perda / total_area) * 100
-    sobras_pct = (sobras_validas / total_area) * 100
-    return aproveitamento_pct, perda_pct, sobras_pct
-
-
-# ==================================================
-# Função de desenho para Versão 4 (subversão da Mista)
-# ==================================================
-
-def desenhar_versao4(canvas, dimensao_folha, quantidade):
-    """
-    Desenha o arranjo ideal para a Versão 4, que utiliza somente a quantidade solicitada,
-    reorganizando os cortes para formar o maior bloco ideal possível.
-
-    Exemplo:
-      Folha: 2140x1200, Corte: 550x220, Quantidade: 9
-      Arranjo ideal fixo: bloco ideal = (990, 1100) mm.
-
-      Sobras:
-         Sobra Vertical: (2140 - 990) x 1200 = 1150 x 1200 mm.
-         Sobra Horizontal: 990 x (1200 - 1100) = 990 x 100 mm.
-
-    Esta função desenha o bloco ideal (um retângulo azul com fundo #c4ec8c)
-    dentro do contorno da folha.
-    """
-    bloco = (990, 1100)  # bloco ideal fixo para o exemplo
-    W, H = dimensao_folha
-    escala = min(400 / W, 300 / H)
-    W_scaled = W * escala
-    H_scaled = H * escala
-    offset_x = (canvas.winfo_width() - W_scaled) / 3
-    offset_y = (canvas.winfo_height() - H_scaled) / 4
-    canvas.delete("all")
-    canvas.create_rectangle(offset_x, offset_y, offset_x + W_scaled, offset_y + H_scaled,
-                            outline="black", fill="white")
-    bw_scaled = bloco[0] * escala
-    bh_scaled = bloco[1] * escala
-    # Posiciona o bloco ideal no canto superior esquerdo da folha
-    bloco_x = offset_x
-    bloco_y = offset_y
-    canvas.create_rectangle(bloco_x, bloco_y, bloco_x + bw_scaled, bloco_y + bh_scaled,
-                            outline="blue", fill="#c4ec8c")
-    canvas.create_text(bloco_x + bw_scaled/2, bloco_y + bh_scaled/2,
-                       text=f"Bloco Ideal\n{bloco[0]} x {bloco[1]} mm", font=("Arial", 10), fill="black")
-
-
-# ==================================================
-# Função de atualização da visualização (backend)
-# ==================================================
-
-def atualizar_visualizacao(event=None):
     try:
-        # Lê as dimensões da folha e do corte (em mm)
+        ps = canvas.postscript(colormode='color',
+                               pagewidth=canvas.winfo_width()*zoom,
+                               pageheight=canvas.winfo_height()*zoom)
+        img = Image.open(io.BytesIO(ps.encode('utf-8')))
+        img = img.convert("RGB")
+        img.save(nome_arquivo, "PDF")
+        print(f"Canvas exportado como {nome_arquivo}.")
+    except Exception as e:
+        print("Erro ao exportar canvas:", e)
+
+
+# ==================================================
+# Função de exportação do Relatório de Corte de Papel (PDF com layout único)
+# ==================================================
+def exportar_relatorio_pdf():
+    """
+    Gera um PDF com o relatório de corte de papel para as versões V1 (Normal), V2 (Rotacionada) e V3 (Mista)
+    em uma única página, utilizando os textos com <br/> para as quebras de linha.
+    """
+    try:
+        root.update()
+        zoom = 4
+
+        # Função auxiliar para converter um canvas em RLImage
+        def canvas_para_rlimage(canvas):
+            ps = canvas.postscript(colormode='color',
+                                   pagewidth=canvas.winfo_width()*zoom,
+                                   pageheight=canvas.winfo_height()*zoom)
+            pil_img = Image.open(io.BytesIO(ps.encode('utf-8')))
+            pil_img = pil_img.convert("RGB")
+            buf = io.BytesIO()
+            pil_img.save(buf, format='PNG')
+            buf.seek(0)
+            return RLImage(buf)
+
+        # Gera as imagens dos três canvas
+        rl_img_v1 = canvas_para_rlimage(canvas_normal)
+        rl_img_v2 = canvas_para_rlimage(canvas_rotacionado)
+        rl_img_v3 = canvas_para_rlimage(canvas_requisitada)
+
+        # Obtemos os textos formatados para PDF a partir das variáveis globais
+        global info_v1_pdf, info_v2_pdf, info_v3_pdf
+        info_total = Paragraph(info_v1_pdf + "<br/><br/>" +
+                               info_v2_pdf + "<br/><br/>" +
+                               info_v3_pdf,
+                               getSampleStyleSheet()['Normal'])
+
+        styles = getSampleStyleSheet()
+        title = Paragraph("Relatório de Corte de Papel", styles['Title'])
+        spacer = Spacer(1, 12)
+
+        page_width, page_height = landscape(A4)
+        margin = 36
+        available_width = page_width - 2 * margin
+
+        col_esq_width = available_width * 0.5
+        col_dir_width = available_width * 0.5
+
+        image_width_esq = col_esq_width
+        image_height_esq = 200
+        image_width_dir = col_dir_width
+        image_height_dir = 200
+
+        def ajustar_imagem(rl_img, largura, altura):
+            rl_img.drawWidth = largura
+            rl_img.drawHeight = altura
+            return rl_img
+
+        rl_img_v1 = ajustar_imagem(
+            rl_img_v1, image_width_esq, image_height_esq)
+        rl_img_v2 = ajustar_imagem(
+            rl_img_v2, image_width_esq, image_height_esq)
+        rl_img_v3 = ajustar_imagem(
+            rl_img_v3, image_width_dir, image_height_dir)
+
+        data = []
+        data.append([title, ""])
+        data.append([rl_img_v1, rl_img_v3])
+        data.append([rl_img_v2, info_total])
+        col_widths = [available_width / 2, available_width / 2]
+        table = Table(data, colWidths=col_widths)
+        table.setStyle(TableStyle([
+            ('SPAN', (0, 0), (1, 0)),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('BOX', (0, 0), (-1, -1), 0.5, 'black'),
+            ('INNERGRID', (0, 0), (-1, -1), 0.25, 'black'),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 12),
+        ]))
+
+        pdf_filename = "Relatorio_Corte_Papel.pdf"
+        doc = SimpleDocTemplate(pdf_filename, pagesize=landscape(A4),
+                                rightMargin=margin, leftMargin=margin,
+                                topMargin=margin, bottomMargin=margin)
+        flowables = [table]
+        doc.build(flowables)
+        print(f"Relatório exportado como '{pdf_filename}'.")
+    except Exception as e:
+        print("Erro ao exportar relatório:", e)
+
+
+# ==================================================
+# Função de atualização da visualização dos canvas e labels
+# ==================================================
+def atualizar_visualizacao(event=None):
+    global info_v1_pdf, info_v2_pdf, info_v3_pdf
+    try:
+        # Leitura dos valores dos inputs
         largura_folha = int(entry_largura_folha.get())
         altura_folha = int(entry_altura_folha.get())
-        input_corte1 = int(entry_largura_corte.get())
-        input_corte2 = int(entry_altura_corte.get())
-        if input_corte2 > input_corte1:
-            largura_corte, altura_corte = input_corte2, input_corte1
-        else:
-            largura_corte, altura_corte = input_corte1, input_corte2
+        largura_corte = int(entry_largura_corte.get())
+        altura_corte = int(entry_altura_corte.get())
+    except ValueError:
+        return
 
-        cortes_requisitados_str = entry_cortes_requisitados.get().strip()
-
-        # Ajusta a orientação da folha: a maior dimensão é considerada a largura
-        if altura_folha > largura_folha:
-            largura_folha, altura_folha = altura_folha, largura_folha
-
-        # Versão 1 (Normal)
-        dimensoes_normal = (largura_corte, altura_corte)
-        cortes_cabem_normal = calcular_cortes_cabem(
-            (largura_folha, altura_folha), dimensoes_normal)
-        sobras_normal = calcular_sobras(
-            (largura_folha, altura_folha), dimensoes_normal, cortes_cabem_normal, rotacionada=False)
-        perc_aprov_v1 = calcular_aproveitamento(
-            (largura_folha, altura_folha), dimensoes_normal, cortes_cabem_normal)
-
-        # Versão 2 (Rotacionada)
-        dimensoes_rotacionada = (altura_corte, largura_corte)
-        cortes_cabem_rotacionada = calcular_cortes_cabem(
-            (largura_folha, altura_folha), dimensoes_rotacionada)
-        sobras_rotacionada = calcular_sobras(
-            (largura_folha, altura_folha), dimensoes_rotacionada, cortes_cabem_rotacionada, rotacionada=True)
-        perc_aprov_v2 = calcular_aproveitamento(
-            (largura_folha, altura_folha), dimensoes_rotacionada, cortes_cabem_rotacionada)
-
-        # Estratégia Mista (Versão 3)
-        total_misturado, arranjo = calcular_cortes_misturados(
-            (largura_folha, altura_folha), dimensoes_normal)
-
-        if cortes_requisitados_str:
-            cortes_requisitados = int(cortes_requisitados_str)
-            if cortes_requisitados < 0:
-                raise ValueError(
-                    "A quantidade de cortes requisitados deve ser positiva.")
-            melhor_orientacao, max_cortes_puro = calcular_melhor_orientacao(
-                (largura_folha, altura_folha), (largura_corte, altura_corte))
-            if max_cortes_puro < total_misturado:
-                melhor_orientacao = (
-                    (largura_corte, altura_corte), "Mista", arranjo)
-                max_cortes = total_misturado
-            else:
-                max_cortes = max_cortes_puro
-            folhas_necessarias = (cortes_requisitados +
-                                  max_cortes - 1) // max_cortes
-            perc_aprov_v3 = calcular_aproveitamento(
-                (largura_folha, altura_folha), melhor_orientacao[0], max_cortes)
+    try:
+        if entry_cortes_requisitados.get().strip():
+            cortes_requisitados = int(entry_cortes_requisitados.get().strip())
         else:
             cortes_requisitados = None
-            folhas_necessarias = None
-            melhor_orientacao = None
-            max_cortes = None
-            perc_aprov_v3 = None
-
-        # Limpa os canvases
-        for c in [canvas_normal, canvas_rotacionado, canvas_requisitada]:
-            c.delete("all")
-
-        # Reordena os canvases: queremos a ordem: Versão 3, Versão 2, Versão 1.
-        canvas_requisitada.pack_forget()
-        canvas_rotacionado.pack_forget()
-        canvas_normal.pack_forget()
-        label_resultado_requisitada.pack_forget()
-        label_resultado_rotacionado.pack_forget()
-        label_resultado_normal.pack_forget()
-
-        # Versão 3 (Mista)
-        if cortes_requisitados is not None:
-            if melhor_orientacao[1] == "Mista":
-                desenhar_folha_mista(canvas_requisitada, (largura_folha, altura_folha), dimensoes_normal,
-                                     max_cortes, melhor_orientacao[2], cortes_requisitados)
-                info_v3 = (f"Versão 3 (Mista, arranjo: {melhor_orientacao[2]})\n"
-                           f"Cortes por folha: {max_cortes}\n"
-                           f"Folhas necessárias: {folhas_necessarias}\n")
-            else:
-                desenhar_folha(canvas_requisitada, (largura_folha, altura_folha), melhor_orientacao[0],
-                               max_cortes, None, None, cortes_requisitados)
-                info_v3 = (f"Orientação: {melhor_orientacao[1]}\n"
-                           f"Cortes por folha: {max_cortes}\n"
-                           f"Folhas necessárias: {folhas_necessarias}\n")
-        else:
-            desenhar_folha_mista(canvas_requisitada, (largura_folha,
-                                 altura_folha), dimensoes_normal, total_misturado, arranjo)
-            info_v3 = (f"Versão 3 (Mista, arranjo: {arranjo})\n"
-                       f"Cortes por folha: {total_misturado}\n")
-        # Versão 2 (Rotacionada)
-        desenhar_folha(canvas_rotacionado, (largura_folha, altura_folha), dimensoes_rotacionada,
-                       cortes_cabem_rotacionada, sobras_rotacionada[0], sobras_rotacionada[1])
-        # Versão 1 (Normal)
-        desenhar_folha(canvas_normal, (largura_folha, altura_folha), dimensoes_normal,
-                       cortes_cabem_normal, sobras_normal[0], sobras_normal[1])
-
-        # Re-pack os canvases e labels na ordem desejada (Versão 3, Versão 2, Versão 1)
-        canvas_requisitada.pack(pady=5)
-        label_resultado_requisitada.pack(pady=5)
-        canvas_rotacionado.pack(pady=5)
-        label_resultado_rotacionado.pack(pady=5)
-        canvas_normal.pack(pady=5)
-        label_resultado_normal.pack(pady=5)
-
-        label_resultado_rotacionado.config(
-            text=(f"Versão 2 (Rotacionada)\n"
-                  f"Corte p/ folha: {cortes_cabem_rotacionada}\n"
-                  f"Sobra Vertical: {sobras_rotacionada[0] or 'N/A'}\n"
-                  f"Sobra Horizontal: {sobras_rotacionada[1] or 'N/A'}\n"
-                  f"% Aproveitamento: {perc_aprov_v2:.1f}%\n")
-        )
-        label_resultado_normal.config(
-            text=(f"Versão 1 (Normal)\n"
-                  f"Corte p/ folha: {cortes_cabem_normal}\n"
-                  f"Sobra Vertical: {sobras_normal[0] or 'N/A'}\n"
-                  f"Sobra Horizontal: {sobras_normal[1] or 'N/A'}\n"
-                  f"% Aproveitamento: {perc_aprov_v1:.1f}%\n")
-        )
-        label_resultado_requisitada.config(text=info_v3)
-
-        # Versão 4 (Subversão da Mista):
-        # Não altera o canvas (mantemos o desenho da Versão 3 no mesmo canvas),
-        # mas exibimos as informações no label, sem modificar o desenho.
-        if cortes_requisitados is not None and melhor_orientacao is not None and melhor_orientacao[1] == "Mista":
-            info_v4 = (f"Versão 4 (Subversão da Mista)\n"
-                       f"Corte p/ folha (solicitados): {cortes_requisitados}\n"
-                       f"Bloco utilizado: 990 x 1100 mm\n"
-                       f"Sobra Vertical: {largura_folha - 990} x {altura_folha} mm\n"
-                       f"Sobra Horizontal: 990 x {altura_folha - 1100} mm\n"
-                       f"Folhas necessárias: {folhas_necessarias}\n")
-            # Acrescenta as informações da Versão 4 ao label da Versão 3
-            label_resultado_requisitada.config(text=info_v3 + "\n" + info_v4)
-
-        internal_frame.update_idletasks()
-        canvas_frame.config(scrollregion=canvas_frame.bbox("all"))
-    except ZeroDivisionError:
-        label_resultado_normal.config(
-            text="Erro: O corte é maior que a folha.")
-        label_resultado_rotacionado.config(
-            text="Erro: O corte é maior que a folha.")
-        label_resultado_requisitada.config(
-            text="Erro: O corte é maior que a folha.")
     except ValueError:
-        label_resultado_normal.config(
-            text="Por favor, insira valores válidos.")
-        label_resultado_rotacionado.config(
-            text="Por favor, insira valores válidos.")
-        label_resultado_requisitada.config(
-            text="Por favor, insira valores válidos.")
+        cortes_requisitados = None
 
+    A_total = largura_folha * altura_folha
 
-# ==================================================
-# Função de exportação da Versão 3 usando PIL (opção B)
-# ==================================================
+    # --- V1 – Versão Normal (Horiz.) ---
+    cortes_v1 = calcular_cortes_cabem(
+        (largura_folha, altura_folha), (largura_corte, altura_corte))
+    desenhar_folha(canvas_normal, (largura_folha, altura_folha),
+                   (largura_corte, altura_corte), cortes_v1)
+    A_used_v1 = cortes_v1 * (largura_corte * altura_corte)
+    n_horiz_v1 = largura_folha // largura_corte
+    n_vert_v1 = altura_folha // altura_corte
+    sobra_v_v1 = largura_folha - n_horiz_v1 * largura_corte
+    sobra_h_v1 = altura_folha - n_vert_v1 * altura_corte
+    A_vert = sobra_v_v1 * altura_folha
+    A_horiz = largura_folha * sobra_h_v1
+    A_overlap = sobra_v_v1 * sobra_h_v1
+    valid_vert = A_vert - A_overlap
+    valid_horiz = A_horiz - A_overlap
+    sobra_total = A_vert + A_horiz - A_overlap
+    if sobra_total > 0:
+        perc_vert_v1 = valid_vert / sobra_total * \
+            (100 - (A_used_v1/A_total*100))
+        perc_horiz_v1 = valid_horiz / sobra_total * \
+            (100 - (A_used_v1/A_total*100))
+    else:
+        perc_vert_v1 = 0
+        perc_horiz_v1 = 0
 
-def exportar_versao3():
-    """
-    Exporta o conteúdo do canvas da Versão 3 (folha mista) para um arquivo PNG,
-    sem a necessidade de Ghostscript.
-    Utiliza PIL.ImageGrab para capturar a área do canvas na tela.
-    """
-    try:
-        canvas_requisitada.update()  # Garante que o canvas esteja atualizado
-        x = canvas_requisitada.winfo_rootx()
-        y = canvas_requisitada.winfo_rooty()
-        w = x + canvas_requisitada.winfo_width()
-        h = y + canvas_requisitada.winfo_height()
-        img = ImageGrab.grab(bbox=(x, y, w, h))
-        img.save("versao3.png")
-        print("Imagem da Versão 3 exportada como 'versao3.png'.")
-    except Exception as e:
-        print("Erro ao exportar imagem:", e)
+    # Gera o texto para visualização (com \n) e para PDF (com <br/>)
+    info_v1_label = "Versão 1 (Normal)\n"
+    info_v1_label += f"Corte p/ folha: {cortes_v1}\n"
+    info_v1_label += f"Sobra Vertical: {sobra_v_v1}x{altura_folha}\n"
+    info_v1_label += f"Sobra Horizontal: {largura_folha}x{sobra_h_v1}\n"
+    info_v1_label += f"% Aproveitamento: {A_used_v1/A_total*100:.1f}%\n"
+    # info_v1_label += f"Sobra Vertical: {sobra_v_v1}x{altura_folha} ({perc_vert_v1:.1f}%)\n"
+    # info_v1_label += f"Sobra Horizontal: {largura_folha}x{sobra_h_v1} ({perc_horiz_v1:.1f}%)"
+    label_resultado_normal.config(text=info_v1_label)
+    info_v1_pdf = info_v1_label.replace("\n", "<br/>")
+
+    # --- V2 – Versão Rotacionada (Vert.) ---
+    cortes_v2 = calcular_cortes_cabem(
+        (largura_folha, altura_folha), (altura_corte, largura_corte))
+    desenhar_folha(canvas_rotacionado, (largura_folha, altura_folha),
+                   (altura_corte, largura_corte), cortes_v2)
+    A_used_v2 = cortes_v2 * (largura_corte * altura_corte)
+    n_horiz_v2 = largura_folha // altura_corte
+    n_vert_v2 = altura_folha // largura_corte
+    sobra_v_v2 = largura_folha - n_horiz_v2 * altura_corte
+    sobra_h_v2 = altura_folha - n_vert_v2 * largura_corte
+    A_vert_v2 = sobra_v_v2 * altura_folha
+    A_horiz_v2 = largura_folha * sobra_h_v2
+    A_overlap_v2 = sobra_v_v2 * sobra_h_v2
+    valid_vert_v2 = A_vert_v2 - A_overlap_v2
+    valid_horiz_v2 = A_horiz_v2 - A_overlap_v2
+    sobra_total_v2 = A_vert_v2 + A_horiz_v2 - A_overlap_v2
+    if sobra_total_v2 > 0:
+        perc_vert_v2 = valid_vert_v2 / sobra_total_v2 * \
+            (100 - (A_used_v2/A_total*100))
+        perc_horiz_v2 = valid_horiz_v2 / sobra_total_v2 * \
+            (100 - (A_used_v2/A_total*100))
+    else:
+        perc_vert_v2 = 0
+        perc_horiz_v2 = 0
+
+    info_v2_label = "Versão 2 (Rotacionada)\n"
+    info_v2_label += f"Corte p/ folha: {cortes_v2}\n"
+    info_v2_label += f"Sobra Vertical: {sobra_v_v2}x{altura_folha}\n"
+    info_v2_label += f"Sobra Horizontal: {largura_folha}x{sobra_h_v2}\n"
+    info_v2_label += f"% Aproveitamento: {A_used_v2/A_total*100:.1f}%\n"
+    # info_v2_label += f"Sobra Vertical: ({perc_vert_v2:.1f}%)\n"
+    # info_v2_label += f"Sobra Horizontal: ({perc_horiz_v2:.1f}%)"
+    label_resultado_rotacionado.config(text=info_v2_label)
+    info_v2_pdf = info_v2_label.replace("\n", "<br/>")
+
+    # --- V3 – Versão Mista ---
+    cortes_misturados, arranjo_mistura = calcular_cortes_misturados(
+        (largura_folha, altura_folha), (largura_corte, altura_corte))
+    max_cortes = cortes_misturados
+    if arranjo_mistura == "normal":
+        desenhar_folha_mista(canvas_requisitada, (largura_folha, altura_folha), (largura_corte, altura_corte),
+                             max_cortes, "normal", cortes_requisitados if cortes_requisitados is not None else max_cortes)
+    else:
+        desenhar_folha_mista(canvas_requisitada, (largura_folha, altura_folha), (largura_corte, altura_corte),
+                             max_cortes, "rotacionada", cortes_requisitados if cortes_requisitados is not None else max_cortes)
+    info_v3_label = f"Versão 3 (Mista, arranjo: {arranjo_mistura})\n"
+    info_v3_label += f"Cortes por folha: {max_cortes}\n"
+    if cortes_requisitados is None:
+        info_v3_label += "Qtd Pedida: -\nFolhas Incompletas: -"
+    else:
+        if max_cortes > 0:
+            folhas_necessarias = (cortes_requisitados +
+                                  max_cortes - 1) // max_cortes
+            folhas_incompletas = 1 if (
+                cortes_requisitados % max_cortes != 0 and cortes_requisitados > 0) else 0
+        else:
+            folhas_necessarias = 0
+            folhas_incompletas = 0
+        info_v3_label += f"Qtd Pedida: {cortes_requisitados}\n"
+        info_v3_label += f"Folhas necessárias: {folhas_necessarias}\n"
+        info_v3_label += f"Folhas Incompletas: {folhas_incompletas}"
+    label_resultado_requisitada.config(text=info_v3_label)
+    info_v3_pdf = info_v3_label.replace("\n", "<br/>")
+
+    internal_frame.update_idletasks()
+    canvas_frame.config(scrollregion=canvas_frame.bbox("all"))
+    print("Visualização atualizada.")
 
 
 # ==================================================
 # Configuração da interface gráfica (frontend)
 # ==================================================
-
 root = tk.Tk()
 root.title("Calculadora de Corte de Papel")
 root.bind("<Return>", atualizar_visualizacao)
@@ -614,11 +582,13 @@ button_calcular = tk.Button(
     frame_inputs, text="Calcular", command=atualizar_visualizacao)
 button_calcular.grid(row=5, column=0, columnspan=2, pady=10)
 
-# Botão para exportar a Versão 3 (usando PIL)
-button_exportar = tk.Button(
-    frame_inputs, text="Exportar Versão 3", command=exportar_versao3)
-button_exportar.grid(row=6, column=0, columnspan=2, pady=10)
+button_exportar_relatorio = tk.Button(
+    frame_inputs, text="Gerar Relatório de Corte de Papel", command=exportar_relatorio_pdf)
+button_exportar_relatorio.grid(row=6, column=0, columnspan=2, pady=10)
 
+# ==================================================
+# Configuração dos widgets de exibição
+# ==================================================
 frame_chapas = tk.Frame(root, bg="#ececea", width=700, height=900)
 frame_chapas.pack(side=tk.RIGHT, padx=10, pady=10)
 
@@ -633,7 +603,7 @@ canvas_frame.config(yscrollcommand=scrollbar.set)
 internal_frame = tk.Frame(canvas_frame)
 canvas_frame.create_window((0, 0), window=internal_frame, anchor="nw")
 
-# Reordenação dos canvas e labels: Ordem desejada: Versão 3, Versão 2, Versão 1.
+# Ordem dos canvas e labels: V3, V2, V1
 canvas_requisitada = Canvas(internal_frame, width=550, height=350, bg="#ececea",
                             highlightthickness=1, highlightbackground="#b4b4b4")
 canvas_requisitada.pack(pady=5)
