@@ -203,28 +203,38 @@ def calcular_cortes_cabem(dimensao_folha, dimensoes_corte):
 
 
 def calcular_sobras(dimensao_folha, dimensoes_corte, cortes_cabem, rotacionada=False):
+    """
+    Para o caso não rotacionado (normal):
+      s1 = sobra lateral = (W - nₕ·pW) x H  
+      s2 = sobra inferior = (nₕ·pW) x (H - nᵥ·pH)
+
+    Para o caso rotacionado:
+      Utilizamos os valores invertidos:
+         nₕ_rot = ⎣W / pH⎦, nᵥ_rot = ⎣H / pW⎦  
+      Então:
+         s1 = sobra vertical = (W - nₕ_rot·pH) x (nᵥ_rot·pW)
+         s2 = sobra horizontal = W x (H - nᵥ_rot·pW)
+    """
     W, H = dimensao_folha
     pW, pH = dimensoes_corte
     if pW == 0 or pH == 0:
         return None, None
-    n_horiz = W // pW
-    n_vert = H // pH
     if not rotacionada:
+        n_horiz = W // pW
+        n_vert = H // pH
         sobra_lateral = W - n_horiz * pW
         sobra_inferior = H - n_vert * pH
         s1 = f"{sobra_lateral}x{H}" if sobra_lateral >= 100 else None
         s2 = f"{n_horiz * pW}x{sobra_inferior}" if sobra_inferior >= 100 else None
         return s1, s2
     else:
-        sobra_lateral = W - n_horiz * pW
-        sobra_horizontal = H - n_vert * pH
-        s1 = f"{sobra_lateral}x{H}" if sobra_lateral >= 100 else None
-        s2 = f"{W}x{sobra_horizontal}" if sobra_horizontal >= 100 else None
-        if sobra_lateral >= 100 and sobra_horizontal >= 100:
-            area_lateral = sobra_lateral * H
-            area_horizontal = W * sobra_horizontal
-            if area_horizontal > area_lateral:
-                s1 = f"{sobra_lateral}x{n_vert * pH}"
+        n_horiz_rot = W // pH
+        n_vert_rot = H // pW
+        sobra_lateral = W - n_horiz_rot * pH
+        sobra_inferior = H - n_vert_rot * pW
+        s1 = f"{sobra_lateral}x{n_vert_rot * pW}" if sobra_lateral >= 100 and (
+            n_vert_rot * pW) >= 100 else None
+        s2 = f"{W}x{sobra_inferior}" if sobra_inferior >= 100 and W >= 100 else None
         return s1, s2
 
 
@@ -319,6 +329,25 @@ def exportar_canvas_pdf(canvas, nome_arquivo, zoom=4):
 
 
 # ==================================================
+# Função auxiliar para ajustar a imagem preservando o aspecto
+# ==================================================
+def ajustar_imagem_preservando_aspecto(rl_img, max_width, max_height):
+    try:
+        orig_width = rl_img.imageWidth
+        orig_height = rl_img.imageHeight
+    except AttributeError:
+        orig_width, orig_height = max_width, max_height
+    aspect = orig_width / float(orig_height)
+    if max_width / aspect <= max_height:
+        rl_img.drawWidth = max_width
+        rl_img.drawHeight = max_width / aspect
+    else:
+        rl_img.drawHeight = max_height
+        rl_img.drawWidth = max_height * aspect
+    return rl_img
+
+
+# ==================================================
 # Função de exportação do Relatório de Corte de Papel (PDF com layout único)
 # ==================================================
 def exportar_relatorio_pdf():
@@ -330,7 +359,6 @@ def exportar_relatorio_pdf():
         root.update()
         zoom = 4
 
-        # Função auxiliar para converter um canvas em RLImage
         def canvas_para_rlimage(canvas):
             ps = canvas.postscript(colormode='color',
                                    pagewidth=canvas.winfo_width()*zoom,
@@ -342,45 +370,36 @@ def exportar_relatorio_pdf():
             buf.seek(0)
             return RLImage(buf)
 
-        # Gera as imagens dos três canvas
         rl_img_v1 = canvas_para_rlimage(canvas_normal)
         rl_img_v2 = canvas_para_rlimage(canvas_rotacionado)
         rl_img_v3 = canvas_para_rlimage(canvas_requisitada)
 
-        # Obtemos os textos formatados para PDF a partir das variáveis globais
+        styles = getSampleStyleSheet()
+        page_width, page_height = landscape(A4)
+        margin = 36
+        available_width = page_width - 2 * margin
+        col_esq_width = available_width * 0.5
+        col_dir_width = available_width * 0.5
+        max_width_esq = col_esq_width
+        max_height_esq = 200
+        max_width_dir = col_dir_width
+        max_height_dir = 200
+
+        rl_img_v1 = ajustar_imagem_preservando_aspecto(
+            rl_img_v1, max_width_esq, max_height_esq)
+        rl_img_v2 = ajustar_imagem_preservando_aspecto(
+            rl_img_v2, max_width_esq, max_height_esq)
+        rl_img_v3 = ajustar_imagem_preservando_aspecto(
+            rl_img_v3, max_width_dir, max_height_dir)
+
         global info_v1_pdf, info_v2_pdf, info_v3_pdf
         info_total = Paragraph(info_v1_pdf + "<br/><br/>" +
                                info_v2_pdf + "<br/><br/>" +
                                info_v3_pdf,
-                               getSampleStyleSheet()['Normal'])
+                               styles['Normal'])
 
-        styles = getSampleStyleSheet()
         title = Paragraph("Relatório de Corte de Papel", styles['Title'])
         spacer = Spacer(1, 12)
-
-        page_width, page_height = landscape(A4)
-        margin = 36
-        available_width = page_width - 2 * margin
-
-        col_esq_width = available_width * 0.5
-        col_dir_width = available_width * 0.5
-
-        image_width_esq = col_esq_width
-        image_height_esq = 200
-        image_width_dir = col_dir_width
-        image_height_dir = 200
-
-        def ajustar_imagem(rl_img, largura, altura):
-            rl_img.drawWidth = largura
-            rl_img.drawHeight = altura
-            return rl_img
-
-        rl_img_v1 = ajustar_imagem(
-            rl_img_v1, image_width_esq, image_height_esq)
-        rl_img_v2 = ajustar_imagem(
-            rl_img_v2, image_width_esq, image_height_esq)
-        rl_img_v3 = ajustar_imagem(
-            rl_img_v3, image_width_dir, image_height_dir)
 
         data = []
         data.append([title, ""])
@@ -414,7 +433,6 @@ def exportar_relatorio_pdf():
 def atualizar_visualizacao(event=None):
     global info_v1_pdf, info_v2_pdf, info_v3_pdf
     try:
-        # Leitura dos valores dos inputs
         largura_folha = int(entry_largura_folha.get())
         altura_folha = int(entry_altura_folha.get())
         largura_corte = int(entry_largura_corte.get())
@@ -443,7 +461,7 @@ def atualizar_visualizacao(event=None):
     sobra_v_v1 = largura_folha - n_horiz_v1 * largura_corte
     sobra_h_v1 = altura_folha - n_vert_v1 * altura_corte
     A_vert = sobra_v_v1 * altura_folha
-    A_horiz = largura_folha * sobra_h_v1
+    A_horiz = (n_horiz_v1 * largura_corte) * sobra_h_v1
     A_overlap = sobra_v_v1 * sobra_h_v1
     valid_vert = A_vert - A_overlap
     valid_horiz = A_horiz - A_overlap
@@ -457,14 +475,11 @@ def atualizar_visualizacao(event=None):
         perc_vert_v1 = 0
         perc_horiz_v1 = 0
 
-    # Gera o texto para visualização (com \n) e para PDF (com <br/>)
-    info_v1_label = "Versão 1 (Normal)\n"
+    info_v1_label = "V1 \n"
     info_v1_label += f"Corte p/ folha: {cortes_v1}\n"
     info_v1_label += f"Sobra Vertical: {sobra_v_v1}x{altura_folha}\n"
-    info_v1_label += f"Sobra Horizontal: {largura_folha}x{sobra_h_v1}\n"
+    info_v1_label += f"Sobra Horizontal: {n_horiz_v1 * largura_corte}x{sobra_h_v1}\n"
     info_v1_label += f"% Aproveitamento: {A_used_v1/A_total*100:.1f}%\n"
-    # info_v1_label += f"Sobra Vertical: {sobra_v_v1}x{altura_folha} ({perc_vert_v1:.1f}%)\n"
-    # info_v1_label += f"Sobra Horizontal: {largura_folha}x{sobra_h_v1} ({perc_horiz_v1:.1f}%)"
     label_resultado_normal.config(text=info_v1_label)
     info_v1_pdf = info_v1_label.replace("\n", "<br/>")
 
@@ -478,7 +493,8 @@ def atualizar_visualizacao(event=None):
     n_vert_v2 = altura_folha // largura_corte
     sobra_v_v2 = largura_folha - n_horiz_v2 * altura_corte
     sobra_h_v2 = altura_folha - n_vert_v2 * largura_corte
-    A_vert_v2 = sobra_v_v2 * altura_folha
+    # ocupar a área dos cortes na vertical
+    A_vert_v2 = sobra_v_v2 * (n_vert_v2 * largura_corte)
     A_horiz_v2 = largura_folha * sobra_h_v2
     A_overlap_v2 = sobra_v_v2 * sobra_h_v2
     valid_vert_v2 = A_vert_v2 - A_overlap_v2
@@ -493,17 +509,15 @@ def atualizar_visualizacao(event=None):
         perc_vert_v2 = 0
         perc_horiz_v2 = 0
 
-    info_v2_label = "Versão 2 (Rotacionada)\n"
+    info_v2_label = "V2 \n"
     info_v2_label += f"Corte p/ folha: {cortes_v2}\n"
-    info_v2_label += f"Sobra Vertical: {sobra_v_v2}x{altura_folha}\n"
+    info_v2_label += f"Sobra Vertical: {sobra_v_v2}x{n_vert_v2 * largura_corte}\n"
     info_v2_label += f"Sobra Horizontal: {largura_folha}x{sobra_h_v2}\n"
     info_v2_label += f"% Aproveitamento: {A_used_v2/A_total*100:.1f}%\n"
-    # info_v2_label += f"Sobra Vertical: ({perc_vert_v2:.1f}%)\n"
-    # info_v2_label += f"Sobra Horizontal: ({perc_horiz_v2:.1f}%)"
     label_resultado_rotacionado.config(text=info_v2_label)
     info_v2_pdf = info_v2_label.replace("\n", "<br/>")
 
-    # --- V3 – Versão Mista ---
+    # --- V3 – Melhor aproveitamento ---
     cortes_misturados, arranjo_mistura = calcular_cortes_misturados(
         (largura_folha, altura_folha), (largura_corte, altura_corte))
     max_cortes = cortes_misturados
@@ -513,8 +527,12 @@ def atualizar_visualizacao(event=None):
     else:
         desenhar_folha_mista(canvas_requisitada, (largura_folha, altura_folha), (largura_corte, altura_corte),
                              max_cortes, "rotacionada", cortes_requisitados if cortes_requisitados is not None else max_cortes)
-    info_v3_label = f"Versão 3 (Mista, arranjo: {arranjo_mistura})\n"
+    A_used_v3 = max_cortes * (largura_corte * altura_corte)
+    aproveitamento_v3 = (A_used_v3 / A_total * 100) if A_total > 0 else 0
+
+    info_v3_label = f"V3 \n"
     info_v3_label += f"Cortes por folha: {max_cortes}\n"
+    info_v3_label += f"% Aproveitamento: {aproveitamento_v3:.1f}%\n"
     if cortes_requisitados is None:
         info_v3_label += "Qtd Pedida: -\nFolhas Incompletas: -"
     else:
@@ -527,7 +545,7 @@ def atualizar_visualizacao(event=None):
             folhas_necessarias = 0
             folhas_incompletas = 0
         info_v3_label += f"Qtd Pedida: {cortes_requisitados}\n"
-        info_v3_label += f"Folhas necessárias: {folhas_necessarias}\n"
+        info_v3_label += f"Folhas Necessárias: {folhas_necessarias}\n"
         info_v3_label += f"Folhas Incompletas: {folhas_incompletas}"
     label_resultado_requisitada.config(text=info_v3_label)
     info_v3_pdf = info_v3_label.replace("\n", "<br/>")
